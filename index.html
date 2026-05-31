@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>小公主的今日任务看板</title>
+    <style>
+        /* 纯标准内建CSS样式，彻底摆脱对Tailwind的依赖，保证任何网络下都绝对不会排版错乱 */
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+        body { background-color: #f8fafc; padding-bottom: 120px; -webkit-tap-highlight-color: transparent; }
+        
+        /* 顶部状态栏 */
+        header { position: sticky; top: 0; background: rgba(255, 255, 255, 0.92); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-b: 1px solid #fce7f3; padding: 20px 24px; display: flex; justify-content: space-between; align-items: flex-end; z-index: 10; }
+        h1 { font-size: 24px; color: #1e293b; font-weight: 700; margin-bottom: 2px; }
+        .date-str { font-size: 14px; color: #64748b; }
+        .count-box { text-align: right; }
+        .count-num { font-size: 24px; font-weight: 700; color: #ec4899; }
+        .count-total { color: #94a3b8; font-size: 14px; }
+        .count-label { font-size: 12px; color: #94a3b8; margin-top: 2px; }
+
+        /* 任务列表区 */
+        main { padding: 16px; }
+        .empty-tip { text-align: center; padding: 48px 0; color: #94a3b8; font-size: 14px; }
+        
+        /* 任务卡片 */
+        .task-card { background: #ffffff; padding: 16px; border-radius: 16px; margin-bottom: 16px; border: 2px solid #ffffff; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.01), 0 2px 4px -1px rgba(0,0,0,0.01); display: flex; align-items: center; justify-content: space-between; transition: all 0.2s ease; cursor: pointer; }
+        .task-card:active { transform: scale(0.97); }
+        .task-left { display: flex; align-items: center; }
+        .task-icon { font-size: 28px; margin-right: 16px; }
+        .task-name { font-size: 16px; font-weight: 700; color: #334155; }
+        .task-time { font-size: 12px; color: #94a3b8; margin-top: 2px; }
+        
+        /* 圆形多选框 */
+        .checkbox { width: 28px; height: 28px; border-radius: 50%; border: 2px solid #e2e8f0; display: flex; align-items: center; justify-content: center; transition: all 0.2s ease; flex-shrink: 0; }
+        
+        /* 任务完成后的状态 */
+        .task-card.is-completed { border-color: #bbf7d0; background-color: rgba(255,255,255,0.7); opacity: 0.6; transform: scale(0.99); }
+        .task-card.is-completed .task-name { text-decoration: line-through; color: #94a3b8; }
+        .task-card.is-completed .checkbox { background-color: #22c55e; border-color: #22c55e; }
+        .checkmark { display: none; width: 14px; height: 14px; fill: none; stroke: white; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+        .task-card.is-completed .checkmark { display: block; }
+
+        /* 吸底总进度条区 */
+        footer { position: fixed; bottom: 0; left: 0; right: 0; max-width: 448px; margin: 0 auto; padding: 16px 24px; background: rgba(255, 255, 255, 0.92); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); border-top: 1px solid #fce7f3; box-shadow: 0 -4px 12px rgba(0,0,0,0.03); z-index: 10; }
+        .progress-info { display: flex; justify-content: space-between; font-size: 13px; font-weight: 700; color: #64748b; margin-bottom: 8px; }
+        .progress-bar-bg { width: 100%; background-color: #e2e8f0; height: 12px; border-radius: 999px; overflow: hidden; }
+        .progress-bar-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #f472b6, #a78bfa, #3b82f6); transition: width 0.4s cubic-bezier(0.4, 0, 0.2, 1); border-radius: 999px; }
+        .text-done { color: #22c55e; }
+        .text-percent { color: #7c3aed; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+    <div id="app">
+        <header>
+            <div>
+                <h1>你好, 宝贝! ✨</h1>
+                <div class="date-str" id="today-date">日期显示</div>
+            </div>
+            <div class="count-box">
+                <span class="count-num" id="completed-count">0</span><span class="count-total" id="total-count">/0</span>
+                <div class="count-label">今日已完成</div>
+            </div>
+        </header>
+
+        <main id="tasks-container">
+            </main>
+
+        <footer>
+            <div class="progress-info">
+                <span id="progress-status">今日打卡进度</span>
+                <span class="text-percent" id="progress-percent">0%</span>
+            </div>
+            <div class="progress-bar-bg">
+                <div class="progress-bar-fill" id="progress-fill"></div>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        // 1. 固定每日静态任务模板（包括周日新增的中文课打印作业）
+        const weeklyTemplate = {
+            1: [ // 周一
+                { id: '1-1', name: '练习钢琴 15 分钟', time: '每日必做', icon: '🎹' },
+                { id: '1-2', name: '练习小号 15 分钟', time: '每日必做', icon: '🎺' },
+                { id: '1-3', name: '中文阅读', time: '每日必做', icon: '📖' },
+                { id: '1-4', name: '叫叫学习', time: '周一至周五', icon: '🐥' },
+                { id: '1-5', name: '完成学校作业', time: '非假期上学日', icon: '📝' },
+                { id: '1-6', name: '收拾书包和书桌', time: '非假期上学日', icon: '🎒' },
+                { id: '1-7', name: '中文课阅读作业', time: '周一特有', icon: '📚' }
+            ],
+            2: [ // 周二
+                { id: '2-1', name: '练习钢琴 15 分钟', time: '每日必做', icon: '🎹' },
+                { id: '2-2', name: '练习小号 15 分钟', time: '每日必做', icon: '🎺' },
+                { id: '2-3', name: '中文阅读', time: '每日必做', icon: '📖' },
+                { id: '2-4', name: '叫叫学习', time: '周一至周五', icon: '🐥' },
+                { id: '2-5', name: '完成学校作业', time: '非假期上学日', icon: '📝' },
+                { id: '2-6', name: '收拾书包和书桌', time: '非假期上学日', icon: '🎒' },
+                { id: '2-7', name: '中文数学五道题', time: '周二特有', icon: '🔢' }
+            ],
+            3: [ // 周三
+                { id: '3-1', name: '练习钢琴 15 分钟', time: '每日必做', icon: '🎹' },
+                { id: '3-2', name: '练习小号 15 分钟', time: '每日必做', icon: '🎺' },
+                { id: '3-3', name: '中文阅读', time: '每日必做', icon: '📖' },
+                { id: '3-4', name: '叫叫学习', time: '周一至周五', icon: '🐥' },
+                { id: '3-5', name: '完成学校作业', time: '非假期上学日', icon: '📝' },
+                { id: '3-6', name: '收拾书包和书桌', time: '非假期上学日', icon: '🎒' },
+                { id: '3-7', name: '中文课听写作业', time: '周三特有', icon: '✍️' }
+            ],
+            4: [ // 周四
+                { id: '4-1', name: '练习钢琴 15 分钟', time: '每日必做', icon: '🎹' },
+                { id: '4-2', name: '练习小号 15 分钟', time: '每日必做', icon: '🎺' },
+                { id: '4-3', name: '中文阅读', time: '每日必做', icon: '📖' },
+                { id: '4-4', name: '叫叫学习', time: '周一至周五', icon: '🐥' },
+                { id: '4-5', name: '完成学校作业', time: '非假期上学日', icon: '📝' },
+                { id: '4-6', name: '收拾书包和书桌', time: '非假期上学日', icon: '🎒' }
+            ],
+            5: [ // 周五
+                { id: '5-1', name: '练习钢琴 15 分钟', time: '每日必做', icon: '🎹' },
+                { id: '5-2', name: '练习小号 15 分钟', time: '每日必做', icon: '🎺' },
+                { id: '5-3', name: '中文阅读', time: '每日必做', icon: '📖' },
+                { id: '5-4', name: '叫叫学习', time: '周一至周五', icon: '🐥' }
+            ],
+            6: [ // 周六
+                { id: '6-1', name: '练习钢琴 15 分钟', time: '每日必做', icon: '🎹' },
+                { id: '6-2', name: '练习小号 15 分钟', time: '每日必做', icon: '🎺' },
+                { id: '6-3', name: '中文阅读', time: '每日必做', icon: '📖' },
+                { id: '6-4', name: '奇奇学英语', time: '周末任务', icon: '🦖' }
+            ],
+            0: [ // 周日
+                { id: '7-1', name: '练习钢琴 15 分钟', time: '每日必做', icon: '🎹' },
+                { id: '7-2', name: '练习小号 15 分钟', time: '每日必做', icon: '🎺' },
+                { id: '7-3', name: '中文阅读', time: '每日必做', icon: '📖' },
+                { id: '7-4', name: '奇奇学英语', time: '周末任务', icon: '🦖' },
+                { id: '7-5', name: '收拾书包和书桌', time: '准备开学', icon: '🎒' },
+                { id: '7-6', name: '完成中文课打印作业', time: '周日特有', icon: '🖨️' }
+            ]
+        };
+
+        // 2. 识别当前星期数与初始化本地存储
+        const localDay = new Date().getDay(); 
+        const storageKey = `daughter_task_day_${localDay}`;
+        let currentTasks = [];
+
+        // 设置动态日期显示
+        document.getElementById('today-date').innerText = new Date().toLocaleDateString('zh-CN', { 
+            month: 'long', day: 'numeric', weekday: 'long' 
+        });
+
+        // 3. 核心数据装载
+        function loadData() {
+            const saved = localStorage.getItem(storageKey);
+            if (saved) {
+                try {
+                    currentTasks = JSON.parse(saved);
+                } catch(e) {
+                    currentTasks = generateFreshDayData();
+                }
+            } else {
+                currentTasks = generateFreshDayData();
+            }
+        }
+
+        function generateFreshDayData() {
+            const template = weeklyTemplate[localDay] || [];
+            return template.map(item => ({ ...item, completed: false }));
+        }
+
+        // 4. 原生DOM实时渲染进度与动态百分比条
+        function updateProgress() {
+            const total = currentTasks.length;
+            const completed = currentTasks.filter(t => t.completed).length;
+            const percentage = total === 0 ? 0 : Math.round((completed / total) * 100);
+
+            document.getElementById('completed-count').innerText = completed;
+            document.getElementById('total-count').innerText = `/${total}`;
+            document.getElementById('progress-percent').innerText = `${percentage}%`;
+            document.getElementById('progress-fill').style.width = `${percentage}%`;
+
+            const statusEl = document.getElementById('progress-status');
+            if (percentage === 100) {
+                statusEl.innerHTML = '<span class="text-done">🏅 今日满分！超级棒！</span>';
+            } else {
+                statusEl.innerText = '今日打卡进度';
+            }
+        }
+
+        // 5. 组装并输出任务 HTML
+        function renderTasks() {
+            const container = document.getElementById('tasks-container');
+            container.innerHTML = ''; 
+
+            if (currentTasks.length === 0) {
+                container.innerHTML = '<div class="empty-tip">今天没有安排任务哦~ ☕</div>';
+                return;
+            }
+
+            currentTasks.forEach((task) => {
+                const card = document.createElement('div');
+                card.className = `task-card ${task.completed ? 'is-completed' : ''}`;
+                
+                card.innerHTML = `
+                    <div class="task-left">
+                        <div class="task-icon">${task.icon}</div>
+                        <div>
+                            <div class="task-name">${task.name}</div>
+                            <div class="task-time">${task.time}</div>
+                        </div>
+                    </div>
+                    <div class="checkbox">
+                        <svg class="checkmark" viewBox="0 0 24 24">
+                            <path d="M5 13l4 4L19 7"></path>
+                        </svg>
+                    </div>
+                `;
+
+                // 绑定点击原生交互行为
+                card.onclick = function() {
+                    task.completed = !task.completed;
+                    localStorage.setItem(storageKey, JSON.stringify(currentTasks));
+                    
+                    // 局部更新样式，极致流畅，拒绝卡顿闪烁
+                    if (task.completed) {
+                        card.classList.add('is-completed');
+                    } else {
+                        card.classList.remove('is-completed');
+                    }
+                    updateProgress();
+                };
+
+                container.appendChild(card);
+            });
+        }
+
+        // 初始化一键运行
+        loadData();
+        renderTasks();
+        updateProgress();
+    </script>
+</body>
+</html>
